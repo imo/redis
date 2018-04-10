@@ -1453,6 +1453,9 @@ void initServerConfig(void) {
     server.assert_line = 0;
     server.bug_report_start = 0;
     server.watchdog_period = 0;
+
+    /* added by imo */
+    server.slaving_download_limit_bytes = -1;
 }
 
 /* This function will try to raise the max number of open files accordingly to
@@ -2872,6 +2875,13 @@ sds genRedisInfoString(char *section) {
                     j, keys, vkeys, server.db[j].avg_ttl);
             }
         }
+    }
+    {
+        /* imo */
+        if (sections++) info = sdscat(info,"\r\n");
+        info = sdscatprintf(info,
+                            "# IMO\r\nslaving-download-limit-bytes:%lld\r\n",
+                            server.slaving_download_limit_bytes);
     }
     return info;
 }

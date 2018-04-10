@@ -947,6 +947,37 @@ void replicationEmptyDbCallback(void *privdata) {
     replicationSendNewlineToMaster();
 }
 
+static int64_t getMonotonicTimeNano() {
+    struct timespec res;
+    clock_gettime(CLOCK_MONOTONIC, &res);
+    return (int64_t) res.tv_sec * (int64_t) 1e9 + res.tv_nsec;
+}
+
+static void waitSomeTime(ssize_t nread) {
+    if (server.slaving_download_limit_bytes <= 0) {
+        return;
+    }
+
+    const double intervalSec = 0.01; // 0.01s
+    const double bandwidthLimitBytes = server.slaving_download_limit_bytes; // 25 mb /s
+
+    static int64_t nextTsNano = 0;
+    static ssize_t totalRead = 0;
+    int64_t curTsNano = getMonotonicTimeNano();
+    int64_t intervalNano = (int64_t) (1e9 * intervalSec);
+
+    if (nextTsNano < curTsNano) {
+        nextTsNano = curTsNano + intervalNano;
+        totalRead = 0;
+    }
+    totalRead += nread;
+
+    if (totalRead > (ssize_t) (bandwidthLimitBytes * intervalSec)) {
+        int64_t diffTimeUsec = (nextTsNano - curTsNano) / 1000;
+        usleep(diffTimeUsec);
+    }
+}
+
 /* Asynchronously read the SYNC payload we receive from a master */
 #define REPL_MAX_WRITTEN_BEFORE_FSYNC (1024*1024*8) /* 8 MB */
 void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
@@ -1033,6 +1064,8 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
         replicationAbortSyncTransfer();
         return;
     }
+    waitSomeTime(nread);
+
     server.stat_net_input_bytes += nread;
 
     /* When a mark is used, we want to detect EOF asap in order to avoid
